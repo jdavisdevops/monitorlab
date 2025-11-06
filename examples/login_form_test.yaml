@@ -1,0 +1,29 @@
+name: "Login Form Test"
+description: "Test login form functionality and validation"
+target_url: "https://example.com/login"
+mode: "sequential"
+
+agents:
+  - type: navigator
+    task: "Navigate to {target_url} and wait for the login form to be visible"
+
+  - type: vision
+    task: "Take a screenshot and verify the login form is properly rendered with username, password fields and submit button visible"
+
+  - type: validator
+    task: "Verify that username field, password field, and login button are all present and enabled"
+
+  - type: interaction
+    task: "Fill in the username field with 'testuser@example.com' and password field with 'testpass123', then click the login button"
+
+  - type: validator
+    task: "Wait for navigation and verify that we either reached a dashboard or got an appropriate error message"
+
+  - type: vision
+    task: "Take a screenshot of the result page to document the outcome"
+
+metadata:
+  author: "MonitorLab"
+  version: "1.0"
+  tags: ["authentication", "forms", "e2e"]
+  notes: "This test uses dummy credentials and expects appropriate error handling"
