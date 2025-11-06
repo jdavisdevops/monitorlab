@@ -1,13 +1,10 @@
-"""Main CLI for MonitorLab."""
+"""CLI entry point for MonitorLab."""
 
 import asyncio
 import sys
 import logging
 import argparse
-import json
-from pathlib import Path
-
-from monitorlab.pipelines.pipeline import PipelineRunner
+from monitorlab.ui import launch_ui
 from monitorlab.config.settings import get_settings
 
 
@@ -28,78 +25,33 @@ def setup_logging(log_level: str):
     )
 
 
-async def run_pipeline_command(args):
-    """Run a pipeline from file.
-
-    Args:
-        args: Command arguments
-    """
-    settings = get_settings()
-    runner = PipelineRunner(settings=settings)
-
-    # Parse variables if provided
-    variables = {}
-    if args.variables:
-        for var in args.variables:
-            if "=" in var:
-                key, value = var.split("=", 1)
-                variables[key] = value
-
-    # Run pipeline
-    result = await runner.run_pipeline_file(args.pipeline, variables=variables)
-
-    # Output results
-    if args.output:
-        output_path = Path(args.output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, "w") as f:
-            json.dump(result, f, indent=2)
-        print(f"Results saved to {args.output}")
-    else:
-        print("\n" + "=" * 80)
-        print("PIPELINE RESULTS")
-        print("=" * 80)
-        print(f"Name: {result['pipeline_name']}")
-        print(f"Success: {result['success']}")
-        print(f"\nSummary: {result['summary']}")
-        print("\nAgent Results:")
-        for agent_result in result["agent_results"]:
-            print(f"\n  - {agent_result['agent_type']} ({agent_result['status']})")
-            print(f"    Execution time: {agent_result['execution_time']:.2f}s")
-            if agent_result.get("error"):
-                print(f"    Error: {agent_result['error']}")
-
-    # Exit with appropriate code
-    sys.exit(0 if result["success"] else 1)
-
-
 def main():
-    """Main entry point for monitorlab-run command."""
+    """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="MonitorLab - AI-Enhanced Website Monitoring System"
+        description="MonitorLab - AI-Enhanced Website Monitoring",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  monitorlab                    # Launch Gradio UI
+  monitorlab --port 8080        # Launch UI on specific port
+  monitorlab --share            # Create public share link
+
+For more information, visit: https://github.com/yourusername/monitorlab
+""",
     )
 
-    subparsers = parser.add_subparsers(dest="command", help="Command to run")
-
-    # Run pipeline command
-    run_parser = subparsers.add_parser("run", help="Run a testing pipeline")
-    run_parser.add_argument("pipeline", help="Path to pipeline YAML file")
-    run_parser.add_argument(
-        "-v",
-        "--variables",
-        nargs="+",
-        help="Variables to substitute (format: key=value)",
-    )
-    run_parser.add_argument("-o", "--output", help="Output file for results (JSON)")
-    run_parser.add_argument(
-        "--log-level",
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
-        help="Logging level",
+    parser.add_argument(
+        "--port",
+        type=int,
+        help="Port for Gradio server (default from settings)",
     )
 
-    # For backward compatibility, if no subcommand is provided but --pipeline is there
-    parser.add_argument("--pipeline", help="Path to pipeline YAML file (deprecated, use 'run')")
+    parser.add_argument(
+        "--share",
+        action="store_true",
+        help="Create a public share link",
+    )
+
     parser.add_argument(
         "--log-level",
         default="INFO",
@@ -110,23 +62,26 @@ def main():
     args = parser.parse_args()
 
     # Setup logging
-    log_level = getattr(args, "log_level", "INFO")
-    setup_logging(log_level)
+    setup_logging(args.log_level)
 
-    # Handle commands
-    if args.command == "run":
-        asyncio.run(run_pipeline_command(args))
-    elif args.pipeline:  # Backward compatibility
-        # Create a minimal args object
-        class MinimalArgs:
-            def __init__(self, pipeline):
-                self.pipeline = pipeline
-                self.variables = None
-                self.output = None
+    # Launch UI
+    try:
+        print("🔬 MonitorLab v0.2.0")
+        print("=" * 50)
+        print("Starting Gradio interface...")
+        print("\nMake sure:")
+        print("  ✅ LM Studio is running")
+        print("  ✅ Qwen2-VL-4B model is loaded")
+        print("  ✅ Local Server is started (port 1234)")
+        print("=" * 50)
 
-        asyncio.run(run_pipeline_command(MinimalArgs(args.pipeline)))
-    else:
-        parser.print_help()
+        launch_ui(share=args.share, server_port=args.port)
+
+    except KeyboardInterrupt:
+        print("\n\nShutting down...")
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        logging.exception("CLI error")
         sys.exit(1)
 
 

@@ -1,234 +1,215 @@
-"""Base agent class for MonitorLab agents."""
+"""Base agent class for domain agents."""
 
-import asyncio
 import logging
-import uuid
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Dict, Any, Optional, TypedDict
+from pathlib import Path
 
-from monitorlab.browser.browser_manager import BrowserManager
-from monitorlab.browser.page_controller import PageController
-from monitorlab.models.llm_client import LLMClient
-from monitorlab.models.vision_client import VisionClient
+from langchain_openai import ChatOpenAI
 from monitorlab.config.settings import get_settings
+from monitorlab.models.vision_client import VisionClient
+from monitorlab.mcp.playwright_client import PlaywrightMCPClient
 
 logger = logging.getLogger(__name__)
 
 
-class AgentStatus(Enum):
-    """Agent execution status."""
+class AgentState(TypedDict):
+    """State object for agent execution (used by LangGraph)."""
 
-    PENDING = "pending"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    TIMEOUT = "timeout"
-
-
-@dataclass
-class AgentResult:
-    """Result of agent execution."""
-
-    agent_id: str
-    agent_type: str
-    status: AgentStatus
-    output: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
-    execution_time: Optional[float] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    agent_name: str
+    task: str
+    target_url: Optional[str]
+    status: str  # pending, running, success, failure, error
+    start_time: datetime
+    end_time: Optional[datetime]
+    output: Dict[str, Any]
+    error: Optional[str]
+    screenshots: list[str]
+    test_run_id: Optional[int]
 
 
-class BaseAgent(ABC):
-    """Base class for all agents."""
+class DomainAgent(ABC):
+    """Base class for domain agents that test complete features/workflows.
+
+    Domain agents are autonomous and responsible for testing entire features,
+    not just performing specialized tasks. For example:
+    - HomepageAgent tests the entire homepage functionality
+    - CheckoutAgent tests the complete checkout flow
+    - AuthAgent tests authentication features
+
+    This is different from specialized worker agents (navigator, validator, etc.)
+    """
 
     def __init__(
         self,
+        name: str,
         task: str,
-        agent_id: Optional[str] = None,
-        browser_manager: Optional[BrowserManager] = None,
-        llm_client: Optional[LLMClient] = None,
-        vision_client: Optional[VisionClient] = None,
+        target_url: Optional[str] = None,
         settings: Optional[Any] = None,
-        **kwargs,
     ):
-        """Initialize base agent.
+        """Initialize domain agent.
 
         Args:
-            task: Task description for this agent
-            agent_id: Optional unique identifier
-            browser_manager: Optional browser manager instance
-            llm_client: Optional LLM client instance
-            vision_client: Optional vision client instance
+            name: Agent name (e.g., "homepage", "checkout")
+            task: Task description
+            target_url: Optional target URL
             settings: Optional settings object
-            **kwargs: Additional agent-specific parameters
         """
-        self.agent_id = agent_id or str(uuid.uuid4())
+        self.name = name
         self.task = task
+        self.target_url = target_url
         self.settings = settings or get_settings()
-        self.kwargs = kwargs
 
-        # Clients and managers
-        self.browser_manager = browser_manager
-        self.llm_client = llm_client or LLMClient(self.settings)
-        self.vision_client = vision_client or VisionClient(self.settings)
+        # Initialize clients
+        self.llm = ChatOpenAI(
+            base_url=self.settings.llm_api_base,
+            api_key=self.settings.llm_api_key,
+            model=self.settings.llm_model,
+            temperature=self.settings.llm_temperature,
+        )
 
-        # Page controller (will be set when page is created)
-        self.page_controller: Optional[PageController] = None
-        self.page_id: Optional[str] = None
+        self.vision_client = VisionClient(self.settings)
+        self.playwright_mcp = PlaywrightMCPClient()
 
         # State
-        self.status = AgentStatus.PENDING
-        self.result: Optional[AgentResult] = None
-        self.start_time: Optional[datetime] = None
-        self.end_time: Optional[datetime] = None
-
-    @property
-    def agent_type(self) -> str:
-        """Get agent type name."""
-        return self.__class__.__name__
-
-    async def setup(self):
-        """Setup agent resources before execution."""
-        # Create page if browser manager is provided
-        if self.browser_manager:
-            self.page_id = f"page_{self.agent_id}"
-            page = await self.browser_manager.create_page(self.page_id)
-            self.page_controller = PageController(page)
-            logger.info(f"Agent {self.agent_id} setup complete with page")
-        else:
-            logger.info(f"Agent {self.agent_id} setup complete (no browser)")
-
-    async def teardown(self):
-        """Clean up agent resources after execution."""
-        if self.browser_manager and self.page_id:
-            try:
-                await self.browser_manager.close_page(self.page_id)
-                logger.info(f"Agent {self.agent_id} page closed")
-            except Exception as e:
-                logger.warning(f"Error closing page for agent {self.agent_id}: {e}")
+        self.state: AgentState = {
+            "agent_name": name,
+            "task": task,
+            "target_url": target_url,
+            "status": "pending",
+            "start_time": datetime.utcnow(),
+            "end_time": None,
+            "output": {},
+            "error": None,
+            "screenshots": [],
+            "test_run_id": None,
+        }
 
     @abstractmethod
-    async def execute(self) -> Dict[str, Any]:
-        """Execute the agent's task.
+    async def execute(self) -> AgentState:
+        """Execute the agent's complete test workflow.
 
-        This method must be implemented by subclasses.
+        This method should:
+        1. Navigate to target URL(s)
+        2. Perform all necessary interactions
+        3. Validate functionality and visual appearance
+        4. Capture evidence (screenshots)
+        5. Return comprehensive results
 
         Returns:
-            Dictionary with execution results
+            Updated AgentState with results
         """
         pass
 
-    async def run(self) -> AgentResult:
-        """Run the agent with proper lifecycle management.
+    async def run(self) -> AgentState:
+        """Run the agent with proper error handling and state management.
 
         Returns:
-            AgentResult with execution details
+            Final AgentState
         """
-        self.start_time = datetime.now()
-        self.status = AgentStatus.RUNNING
-        logger.info(f"Starting agent {self.agent_id} ({self.agent_type}): {self.task}")
+        self.state["status"] = "running"
+        self.state["start_time"] = datetime.utcnow()
 
         try:
-            # Setup
-            await self.setup()
-
-            # Execute with timeout
-            timeout = self.settings.agent_timeout
-            try:
-                output = await asyncio.wait_for(self.execute(), timeout=timeout)
-                self.status = AgentStatus.COMPLETED
-                error = None
-            except asyncio.TimeoutError:
-                logger.error(f"Agent {self.agent_id} timed out after {timeout}s")
-                self.status = AgentStatus.TIMEOUT
-                output = {}
-                error = f"Execution timed out after {timeout} seconds"
+            logger.info(f"Starting agent: {self.name} - {self.task}")
+            self.state = await self.execute()
+            self.state["status"] = "success"
+            logger.info(f"Agent {self.name} completed successfully")
 
         except Exception as e:
-            logger.exception(f"Agent {self.agent_id} failed: {e}")
-            self.status = AgentStatus.FAILED
-            output = {}
-            error = str(e)
+            logger.exception(f"Agent {self.name} failed: {e}")
+            self.state["status"] = "error"
+            self.state["error"] = str(e)
 
         finally:
-            # Teardown
-            try:
-                await self.teardown()
-            except Exception as e:
-                logger.warning(f"Error during teardown for agent {self.agent_id}: {e}")
+            self.state["end_time"] = datetime.utcnow()
+            duration = (
+                self.state["end_time"] - self.state["start_time"]
+            ).total_seconds()
+            self.state["output"]["duration_seconds"] = duration
 
-            # Calculate execution time
-            self.end_time = datetime.now()
-            execution_time = (self.end_time - self.start_time).total_seconds()
+            # Cleanup
+            await self.playwright_mcp.cleanup()
 
-            # Create result
-            self.result = AgentResult(
-                agent_id=self.agent_id,
-                agent_type=self.agent_type,
-                status=self.status,
-                output=output,
-                error=error,
-                execution_time=execution_time,
-                metadata={
-                    "task": self.task,
-                    "start_time": self.start_time.isoformat(),
-                    "end_time": self.end_time.isoformat(),
-                },
-            )
+        return self.state
 
-            logger.info(
-                f"Agent {self.agent_id} finished with status {self.status.value} "
-                f"in {execution_time:.2f}s"
-            )
+    async def take_screenshot(self, name: str) -> str:
+        """Take a screenshot and save it.
 
-        return self.result
+        Args:
+            name: Screenshot name
 
-    async def ask_llm(
-        self,
-        prompt: str,
-        system_prompt: Optional[str] = None,
-        temperature: Optional[float] = None,
-    ) -> str:
+        Returns:
+            Path to saved screenshot
+        """
+        screenshot_dir = Path(self.settings.screenshot_dir)
+        screenshot_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        filename = f"{self.name}_{name}_{timestamp}.png"
+        filepath = screenshot_dir / filename
+
+        # Use MCP to take screenshot
+        await self.playwright_mcp.execute_tool(
+            "playwright_screenshot",
+            {"name": str(filepath), "full_page": True},
+        )
+
+        self.state["screenshots"].append(str(filepath))
+        logger.info(f"Screenshot saved: {filepath}")
+        return str(filepath)
+
+    async def validate_visual(
+        self, screenshot_path: str, expected_elements: list[str]
+    ) -> Dict[str, Any]:
+        """Validate visual rendering using vision model.
+
+        Args:
+            screenshot_path: Path to screenshot
+            expected_elements: List of expected UI elements
+
+        Returns:
+            Validation results
+        """
+        return await self.vision_client.validate_rendering(
+            screenshot_path, expected_elements
+        )
+
+    async def ask_llm(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """Ask the LLM a question.
 
         Args:
             prompt: User prompt
             system_prompt: Optional system prompt
-            temperature: Optional temperature override
 
         Returns:
             LLM response
         """
-        return await self.llm_client.generate(
-            prompt=prompt,
-            system_prompt=system_prompt,
-            temperature=temperature,
-        )
+        messages = []
+        if system_prompt:
+            messages.append(("system", system_prompt))
+        messages.append(("user", prompt))
 
-    async def analyze_screenshot(
-        self,
-        screenshot_path: str,
-        prompt: str,
-        system_prompt: Optional[str] = None,
-    ) -> str:
-        """Analyze a screenshot with vision model.
+        response = await self.llm.ainvoke(messages)
+        return response.content
 
-        Args:
-            screenshot_path: Path to screenshot
-            prompt: Analysis prompt
-            system_prompt: Optional system prompt
+    def get_system_prompt(self) -> str:
+        """Get the system prompt for this agent.
 
         Returns:
-            Analysis result
+            System prompt describing agent capabilities
         """
-        return await self.vision_client.analyze_image(
-            screenshot_path,
-            prompt,
-            system_prompt=system_prompt,
-        )
+        base_prompt = f"""You are a {self.name} testing agent responsible for: {self.task}
 
-    def __repr__(self) -> str:
-        return f"{self.agent_type}(id={self.agent_id}, task={self.task[:50]}...)"
+Your capabilities:
+- Browser automation via Playwright MCP tools
+- Visual validation using Qwen2-VL vision model
+- Comprehensive functional testing
+- Screenshot capture and analysis
+
+{self.playwright_mcp.get_system_prompt_addition()}
+
+Execute your tests thoroughly and provide detailed results."""
+
+        return base_prompt

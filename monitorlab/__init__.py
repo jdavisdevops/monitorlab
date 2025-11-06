@@ -1,20 +1,26 @@
 """
-MonitorLab - AI-Enhanced Website Monitoring System
+MonitorLab - AI-Enhanced Website Monitoring with Multi-Agent Architecture
 """
 
-from monitorlab.core.orchestrator import AgentOrchestrator
-from monitorlab.agents.navigator import NavigatorAgent
-from monitorlab.agents.interaction import InteractionAgent
-from monitorlab.agents.vision import VisionAgent
-from monitorlab.agents.validator import ValidatorAgent
+from monitorlab.graph.orchestrator import TestOrchestrator
+from monitorlab.agents import (
+    DomainAgent,
+    GenericTestAgent,
+    HomepageAgent,
+    AuthenticationAgent,
+    CheckoutAgent,
+)
 from monitorlab.config.settings import Settings
+from monitorlab.ui import launch_ui
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
-    "AgentOrchestrator",
-    "NavigatorAgent",
-    "InteractionAgent",
-    "VisionAgent",
-    "ValidatorAgent",
+    "TestOrchestrator",
+    "DomainAgent",
+    "GenericTestAgent",
+    "HomepageAgent",
+    "AuthenticationAgent",
+    "CheckoutAgent",
     "Settings",
+    "launch_ui",
 ]

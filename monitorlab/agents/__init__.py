@@ -1,16 +1,16 @@
-"""Agent implementations for MonitorLab."""
+"""Domain agents for testing complete features and workflows."""
 
-from monitorlab.agents.base_agent import BaseAgent, AgentResult
-from monitorlab.agents.navigator import NavigatorAgent
-from monitorlab.agents.interaction import InteractionAgent
-from monitorlab.agents.vision import VisionAgent
-from monitorlab.agents.validator import ValidatorAgent
+from monitorlab.agents.base_agent import DomainAgent, AgentState
+from monitorlab.agents.homepage_agent import HomepageAgent
+from monitorlab.agents.auth_agent import AuthenticationAgent
+from monitorlab.agents.checkout_agent import CheckoutAgent
+from monitorlab.agents.generic_agent import GenericTestAgent
 
 __all__ = [
-    "BaseAgent",
-    "AgentResult",
-    "NavigatorAgent",
-    "InteractionAgent",
-    "VisionAgent",
-    "ValidatorAgent",
+    "DomainAgent",
+    "AgentState",
+    "HomepageAgent",
+    "AuthenticationAgent",
+    "CheckoutAgent",
+    "GenericTestAgent",
 ]

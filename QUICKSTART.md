@@ -1,238 +1,252 @@
 # MonitorLab Quick Start Guide
 
-Get started with MonitorLab in 5 minutes!
+Get started with MonitorLab's new architecture in 5 minutes!
+
+## What's New in v0.2.0
+
+- ✅ **LangGraph** for orchestration (not custom code)
+- ✅ **Domain agents** that test complete features (not specialized workers)
+- ✅ **Qwen2-VL-4B** vision model (not LLaVA)
+- ✅ **Playwright MCP** (not custom browser wrappers)
+- ✅ **Gradio UI** (not built from scratch)
+- ✅ **SQLite history tracking** built-in
+- ✅ **uv-ready** for modern Python packaging
 
 ## Prerequisites
 
-- Mac with M-series chip (M1, M2, M3) and 16GB+ RAM
-- Python 3.10 or higher
-- [LM Studio](https://lmstudio.ai/) installed
+- Mac with M-series chip (M1/M2/M3) and 16GB+ RAM
+- Python 3.10+
+- [LM Studio](https://lmstudio.ai/)
 
-## Step 1: Install MonitorLab
+## Step 1: Install
+
+### With uv (Recommended - Much Faster!)
 
 ```bash
-# Clone or navigate to the repository
+# Install uv
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Install MonitorLab
 cd monitorlab
+uv pip install -e .
+```
 
-# Install in development mode
+### With pip
+
+```bash
 pip install -e .
-
-# Install Playwright browsers
-playwright install chromium
 ```
 
 ## Step 2: Setup LM Studio
 
 1. **Download and launch LM Studio**
 
-2. **Load recommended models:**
+2. **Load models:**
 
-   **For LLM (reasoning):**
-   - Go to "Discover" tab
-   - Search for "Llama-3.2-3B-Instruct"
-   - Download and load the GGUF Q4 version
+   Navigate to "Discover" tab:
 
-   **For Vision (visual validation):**
-   - Search for "moondream2" or "llava-v1.6-7b"
-   - Download the Q4 quantized version
+   **For Vision (Required):**
+   - Search for "Qwen2-VL-4B-Instruct"
+   - Download Q4 quantized version
+   - Load it
 
-3. **Start the API server:**
+   **For LLM (Required):**
+   - Search for "Llama-3.2-3B-Instruct" or "Qwen2.5-3B-Instruct"
+   - Download Q4 version
+   - Load it
+
+3. **Start API server:**
    - Go to "Local Server" tab
    - Click "Start Server"
-   - Note the port (usually 1234)
+   - Verify port is 1234
    - Keep LM Studio running
 
-## Step 3: Configure MonitorLab
-
-Create a `.env` file in the project root:
+## Step 3: Configure
 
 ```bash
 cp .env.example .env
+# Default settings work fine!
 ```
 
-Edit `.env` with your settings (default values work for standard LM Studio setup):
-
-```env
-LLM_API_BASE=http://localhost:1234/v1
-LLM_MODEL=local-model
-VISION_API_BASE=http://localhost:1234/v1
-VISION_MODEL=local-vision-model
-HEADLESS=false
-```
-
-## Step 4: Run Your First Test
-
-### Option A: Interactive Chat Mode (Recommended)
+## Step 4: Launch
 
 ```bash
-monitorlab-chat
+monitorlab
 ```
 
-Then try:
+The Gradio UI will open at http://localhost:7860
+
+## Your First Test
+
+In the Gradio chat interface, try:
+
 ```
-> Check if https://example.com loads correctly
+Check if https://example.com loads correctly
 ```
 
-### Option B: Run a Pipeline
+Watch as MonitorLab:
+1. 🤖 Understands your request
+2. 🎯 Spawns appropriate agent (HomepageAgent)
+3. 🌐 Navigates to the site
+4. 👁️ Takes screenshot
+5. ✅ Validates with Qwen2-VL
+6. 📊 Reports results
 
-```bash
-monitorlab-run run examples/basic_website_check.yaml
+All in ~5 seconds!
+
+## Usage Patterns
+
+### 1. Interactive Chat (Easiest)
+
+Perfect for ad-hoc testing:
+
+```
+Test the login form at https://myapp.com/login
+Verify checkout flow on https://shop.com/cart
+Check if https://example.com has proper SEO
 ```
 
-### Option C: Python Script
-
-Create `my_test.py`:
+### 2. Programmatic (For CI/CD)
 
 ```python
 import asyncio
-from monitorlab import AgentOrchestrator, NavigatorAgent, VisionAgent
+from monitorlab import TestOrchestrator, HomepageAgent
 
-async def main():
-    orchestrator = AgentOrchestrator()
-    await orchestrator.setup()
+async def test():
+    orch = TestOrchestrator()
+    await orch.initialize()
+    
+    orch.add_agent(HomepageAgent("https://mysite.com"))
+    results = await orch.run_parallel("Deploy Check")
+    
+    print(f"Success: {results['statistics']['success_rate']}")
 
-    orchestrator.spawn_agent(
-        NavigatorAgent,
-        task="Navigate to https://example.com"
-    )
-
-    orchestrator.spawn_agent(
-        VisionAgent,
-        task="Verify the page renders correctly"
-    )
-
-    results = await orchestrator.run()
-
-    for result in results:
-        print(f"{result.agent_type}: {result.status.value}")
-
-    await orchestrator.teardown()
-
-asyncio.run(main())
+asyncio.run(test())
 ```
 
-Run it:
+### 3. Multiple Agents in Parallel
+
+```python
+# Test multiple features simultaneously
+orch.add_agent(HomepageAgent("https://site.com"))
+orch.add_agent(CheckoutAgent("https://site.com/cart"))
+orch.add_agent(AuthenticationAgent("https://site.com/login"))
+
+# All run in parallel, each testing complete functionality
+results = await orch.run_parallel()
+```
+
+## Key Concepts
+
+### Domain Agents (NEW!)
+
+Each agent tests an **entire feature**:
+
+- `HomepageAgent`: Tests complete homepage (navigation, layout, content)
+- `AuthenticationAgent`: Tests full login flow (form, submission, errors)
+- `CheckoutAgent`: Tests checkout process (cart, billing, payment pages)
+- `GenericTestAgent`: For custom tests via natural language
+
+### LangGraph Orchestration
+
+- Manages agent state
+- Tracks execution history
+- Handles parallel/sequential execution
+- Provides checkpointing
+
+### Run History
+
+Every test is automatically saved:
+
+```python
+from monitorlab.database import TestRunRepository
+
+# View recent runs
+runs = await TestRunRepository.get_recent_test_runs()
+
+# Get detailed stats
+stats = await TestRunRepository.get_test_statistics(run_id=1)
+```
+
+Or view in the Gradio UI's "📊 Test History" tab.
+
+## Examples
+
+See `examples/` directory:
+
+- `basic_usage.py`: Simple single-agent test
+- `multi_agent.py`: Parallel multi-agent testing
+
+Run them:
+
 ```bash
-python my_test.py
+python examples/basic_usage.py
+python examples/multi_agent.py
 ```
-
-## What Just Happened?
-
-MonitorLab:
-1. ✅ Started a browser using Playwright
-2. ✅ Used your local LLM to understand the task
-3. ✅ Navigated to the website
-4. ✅ Took a screenshot
-5. ✅ Used vision model to validate rendering
-6. ✅ Reported results
-
-All **completely locally** on your Mac! 🎉
 
 ## Common Issues
 
 ### "Connection refused" error
-**Problem:** LM Studio isn't running or API server isn't started
+**Problem:** LM Studio isn't running  
 **Solution:** Open LM Studio → Local Server → Start Server
 
-### "No model loaded" error
-**Problem:** No model loaded in LM Studio
-**Solution:** Load a model in LM Studio (Models tab → Load Model)
-
-### Browser doesn't launch
-**Problem:** Playwright browsers not installed
-**Solution:** Run `playwright install chromium`
-
-### Out of memory errors
-**Problem:** Model too large for your RAM
-**Solution:** Use smaller models:
-- LLM: Try Llama-3.2-1B or Phi-3-mini
-- Vision: Try Moondream2 (only 1.6B parameters)
+### "No model loaded"
+**Problem:** Models not loaded in LM Studio  
+**Solution:** Load Qwen2-VL-4B and a 3B LLM model
 
 ### Slow execution
-**Problem:** Model inference is slow
-**Solution:**
-- Use quantized models (Q4_K_M or Q5_K_M)
-- Reduce max_tokens in .env
-- Use smaller models
-- Close other applications
+**Problem:** Models too large or not quantized  
+**Solution:** Use Q4 quantized models, close other apps
+
+### Out of memory
+**Problem:** Not enough RAM for models  
+**Solution:** Use 3B models, Q4 quantization, close other apps
 
 ## Next Steps
 
-Now that you have MonitorLab running:
-
-1. **Try the chat interface** - Most intuitive way to test websites
-   ```bash
-   monitorlab-chat
+1. **Try different agents:**
+   ```python
+   from monitorlab import (
+       HomepageAgent,
+       AuthenticationAgent,
+       CheckoutAgent,
+       GenericTestAgent,
+   )
    ```
 
-2. **Create custom pipelines** - Define test workflows in YAML
-   - See `examples/` directory
-   - Check `examples/README.md` for guidance
-
-3. **Integrate into CI/CD** - Run after deployments
-   ```bash
-   monitorlab-run run my_test_pipeline.yaml
+2. **Create custom domain agents:**
+   ```python
+   from monitorlab.agents import DomainAgent
+   
+   class MyFeatureAgent(DomainAgent):
+       async def execute(self):
+           # Test your complete feature
+           pass
    ```
 
-4. **Explore the Python API** - Build custom automation
-   - See `examples/simple_usage.py`
-   - Check main README for API docs
+3. **Integrate with CI/CD:**
+   - Run programmatically in headless mode
+   - Check success rates
+   - Fail builds on errors
 
-## Example Test Ideas
+4. **Explore LangGraph features:**
+   - Conditional agent execution
+   - Agent dependencies
+   - State persistence
 
-### After deployment validation:
-```yaml
-# post_deploy_check.yaml
-name: "Post-Deploy Validation"
-target_url: "https://your-site.com"
-agents:
-  - type: navigator
-    task: "Navigate to {target_url}"
-  - type: vision
-    task: "Verify homepage renders correctly"
-  - type: validator
-    task: "Check that all critical links work"
-```
+## Tips
 
-### Login flow test:
-```bash
-# In chat mode
-> Test the login form at https://myapp.com/login with test credentials
-```
-
-### Visual regression:
-```bash
-# In chat mode
-> Take screenshots of https://myapp.com at mobile and desktop sizes and verify rendering
-```
+- **Start small**: Test one page first, then expand
+- **Use chat interface**: Fastest way to validate approach
+- **Check history**: Learn from past runs
+- **Parallel agents**: Test multiple features simultaneously
+- **Custom agents**: Create domain agents for your specific features
 
 ## Getting Help
 
-- **Documentation**: See main README.md
-- **Examples**: Browse `examples/` directory
-- **Logs**: Check `monitorlab.log` for detailed info
-- **Issues**: Report at GitHub Issues (if this is a repo)
-
-## Pro Tips
-
-1. **Run in headless mode for CI/CD:**
-   ```env
-   HEADLESS=true
-   ```
-
-2. **Adjust timeouts for slow sites:**
-   ```env
-   BROWSER_TIMEOUT=60000  # 60 seconds
-   ```
-
-3. **Save screenshots automatically:**
-   ```env
-   SCREENSHOT_DIR=./test-screenshots
-   ```
-
-4. **Use variables in pipelines:**
-   ```bash
-   monitorlab-run run test.yaml -v env=staging
-   ```
+- **Logs**: Check `monitorlab.log`
+- **Database**: Query `monitorlab.db` for detailed history
+- **Docs**: See full [README.md](README.md)
+- **Troubleshooting**: See [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
 Happy testing! 🚀
